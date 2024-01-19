@@ -15,22 +15,30 @@ def randomDate(start, end, format):
     ptime = stime + prop * (etime - stime)
     return ptime.strftime(format)
 
-def preProcessData(file):
+def preProcessData(file, percentile, data_mode):
     """
-    对读取raw data, 并进行初步整理
+    对读取的原始数据进行初步整理，并根据时间戳选择前百分之多少的数据
     """
-    df=pd.read_csv(file,parse_dates=True,index_col=0)
-    df=df.reset_index()
+    df = pd.read_csv(file, parse_dates=True, index_col=0)
+    df = df.reset_index()
     df.rename(columns={df.columns[0]: "datetime"}, inplace=True)
+
+    # 计算时间戳的百分位数
+    cutoff_date = df['datetime'].quantile(percentile)
+    if data_mode=="train":
+        df = df[df['datetime'] <= cutoff_date]
+    elif data_mode=="test":
+        df = df[df['datetime'] > cutoff_date]
     return df
 
 def episode(df, date):
     # filter df by day
     df['datetime'] = pd.to_datetime(df['datetime'])
-    filtered_df = df[df['datetime'].dt.date == pd.to_datetime(date).date()]
+    filtered_df = df[df['datetime'].dt.date == pd.to_datetime(date).date()].reset_index()
     # 显示结果 
     output_columns = ['open', 'close', 'high', 'low', 'volume']
-    return filtered_df[output_columns]
+    output = filtered_df[output_columns]
+    return output
 
 def store_date(df):
     """
@@ -44,7 +52,7 @@ def store_date(df):
     return unique_list
 
 class FuturesTradingEnv(gym.Env):
-    def __init__(self, win_len, data_file_path, furtures):
+    def __init__(self, win_len, data_file_path, furtures, data_mode):
         # furtures: ["IC", "IF"]
         super(FuturesTradingEnv, self).__init__()
 
@@ -63,7 +71,7 @@ class FuturesTradingEnv(gym.Env):
         
         # actions 有两个，long，short
         
-        self.market_data = preProcessData(data_file_path)
+        self.market_data = preProcessData(data_file_path, 0.7, data_mode)
         self.date_list = store_date(self.market_data)
         # print(self.date_list)
         self.date_idx = 0
@@ -92,6 +100,7 @@ class FuturesTradingEnv(gym.Env):
             "position": 0, 
         }
     def step(self, action):
+        print(action)
         # 处理一步交易逻辑
         # action：{long 0, short 1} -> 论文中为{-1, 1}
         if action==0:
@@ -104,21 +113,23 @@ class FuturesTradingEnv(gym.Env):
         info = self.account_info
         
         reward = self.DSR_reward(action)
+        # reward = self.profit_reward(action)
         self.t += 1 # 顺序很重要
         observation = self.market_data_day[self.t - self.win_len: self.t] 
         done = (self.t == self.len)
         truncated = done
-        print(info.values())
+        # print(info.values())
         return observation, reward, done, truncated, info
 
-    def reset(self, date_idx=0):
+    def reset(self):
+        self.market_data_day = episode(df=self.market_data, 
+                                       # randomDate(start, end, format)
+                                       date=self.date_list[self.date_idx]
+                                      ) 
+        # print(self.date_list[self.date_idx])
         self.date_idx += 1 # 下一次reset 随机到另一天的数据
         # 模型输入需要观察wein_len 宽的历史数据，因此开票之后需要等一等
         self.t = self.win_len
-        self.market_data_day = episode(df=self.market_data, 
-                                       # randomDate(start, end, format)
-                                       date=self.date_list[date_idx]
-                                      ) 
         # print("market_data_day", self.market_data_day)
         self.market_obs = self.market_data_day[self.t - self.win_len: self.t] # [0, t-1] ['open', 'close', 'high', 'low', 'volume']
         HH, LC = self.market_obs['high'].max(), self.market_obs['close'].min()
@@ -227,6 +238,13 @@ class FuturesTradingEnv(gym.Env):
         self.At0 = eta*r_t + (1-eta)*self.At0
         self.Bt0 = eta*r_t**2 + (1-eta)*self.Bt0
         return d_t
+    def profit_reward(self, action):
+        info = self.account_info
+        margin, principal, hold_float, step_hold_profit, profit, position = info.values()
+        pc_t, pc_t_ = self.market_data_day.iloc[self.t].loc["close"], self.market_data_day.iloc[self.t-1].loc["close"] # p_t, p_t-1
+        ### Calculate step return #####
+        r_t = (pc_t-pc_t_ - 2*self.slip)*position - self.trans_fee*np.abs(position - action)*pc_t
+        return r_t
     
 # # 使用环境的示例
 # env = FuturesTradingEnv(win_len=30, data_file_path="./data/IC_2015to2018.csv", furtures="IC")
