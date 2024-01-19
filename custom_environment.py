@@ -196,8 +196,8 @@ class FuturesTradingEnv(gym.Env):
                 step_hold_profit = ((pc_t-pc_t_)*position - 2*self.slip) \
                     - self.trans_fee*np.abs(position-action)*pc_t
                 profit = step_hold_profit + hold_float
-                hold_float = 0
                 margin += hold_float*self.contract_multiplier
+                hold_float = 0
                 position = -1
             elif position == 0:
                 profit = 0
