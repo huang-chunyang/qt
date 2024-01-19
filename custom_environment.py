@@ -62,20 +62,22 @@ class FuturesTradingEnv(gym.Env):
         self.slip = 0.2  # constant slippage
         
         # actions 有两个，long，short
-        self.action_space = spaces.Discrete(2)
+        
         self.market_data = preProcessData(data_file_path)
         self.date_list = store_date(self.market_data)
-        print(self.date_list)
+        # print(self.date_list)
         self.date_idx = 0
         self.tot_date = len(self.date_list)
         # observation: 过去的market data，Indicator(BuyLine, SellLine), account_profit
-        self.observation_space = spaces.Dict(
-            {
-                "market_data": spaces.Box(low=-np.inf, high=np.inf, shape=(self.win_len, 5), dtype=np.float32), # 5: open, close, high, low, volume
-                "indicators": spaces.Box(low=-np.inf, high=np.inf, shape=(2, ), dtype=np.float32),
-                # "account": spaces.Box(low=-np.inf, high=np.inf, shape=(2, ), dtype=np.float32) 
-            }
-        )
+        # self.observation_space = spaces.Dict(
+        #     {
+        #         "market_data": spaces.Box(low=-np.inf, high=np.inf, shape=(self.win_len, 5), dtype=np.float32), # 5: open, close, high, low, volume
+        #         "indicators": spaces.Box(low=-np.inf, high=np.inf, shape=(2, ), dtype=np.float32),
+        #         # "account": spaces.Box(low=-np.inf, high=np.inf, shape=(2, ), dtype=np.float32) 
+        #     }
+        # )
+        self.observation_space = (self.win_len, 5)
+        self.action_space = spaces.Discrete(2)
         # self.observation_space = episode(df=self.market_data, date="2019-12-30")[0: self.win_len] # 选一天的示例，计算observation_space
         # print(type(self.observation_space))
         # print(self.observation_space)
@@ -103,10 +105,11 @@ class FuturesTradingEnv(gym.Env):
         
         reward = self.DSR_reward(action)
         self.t += 1 # 顺序很重要
-        observation = self.market_data[self.t - self.win_len: self.t] 
+        observation = self.market_data_day[self.t - self.win_len: self.t] 
         done = (self.t == self.len)
-        
-        return observation, reward, done, info
+        truncated = done
+        print(info.values())
+        return observation, reward, done, truncated, info
 
     def reset(self, date_idx=0):
         self.date_idx += 1 # 下一次reset 随机到另一天的数据
@@ -121,7 +124,7 @@ class FuturesTradingEnv(gym.Env):
         HH, LC = self.market_obs['high'].max(), self.market_obs['close'].min()
         HC, LL = self.market_obs['close'].max(), self.market_obs['low'].min()
         range = max(HH - LC, HC - LL)
-        print(type(self.market_obs["open"]))
+        # print(type(self.market_obs["open"]))
         open = self.market_obs["open"].iloc[-1]
         # BuyLine, SellLine
         self.indicators = [open + K_1 * range, open - K_2 * range]
@@ -136,7 +139,7 @@ class FuturesTradingEnv(gym.Env):
             "market_data": self.market_obs, # 5: open, close, high, low, volume
             "indicators": self.indicators
         }
-        return observation, self.account_info
+        return observation["market_data"], self.account_info
 
     def render(self, mode='human'):
         # 可选：渲染环境状态
@@ -155,7 +158,7 @@ class FuturesTradingEnv(gym.Env):
             
         pc_t, pc_t_ = self.market_data_day.iloc[self.t].loc["close"], self.market_data_day.iloc[self.t-1].loc["close"] # p_t, p_t-1
         info = self.account_info
-        margin, principal, hold_float, step_hold_profit, profit, position = info.values()
+        margin, principal, hold_float, step_hold_profit, profit, position = info['margin'], info['principal'], info['hold_float'], info['step_hold_profit'], info['profit'], info['position']
 
         '''### 依「交易訊號&持單狀態」執行交易rules ###'''
         if action == 1:  #action為交易訊號：{1=long, -1=short}
@@ -225,25 +228,25 @@ class FuturesTradingEnv(gym.Env):
         self.Bt0 = eta*r_t**2 + (1-eta)*self.Bt0
         return d_t
     
-# 使用环境的示例
-env = FuturesTradingEnv(win_len=30, data_file_path="./data/IC_2015to2018.csv", furtures="IC")
-observation = env.reset(env.date_idx)
-done = False
-import matplotlib.pyplot as plt
-reward_list = []
-profit_list = []
-while not done:
-    action = env.action_space.sample()  # 或者您的代理生成的行动
-    observation, reward, done, info = env.step(action)
-    reward_list.append(reward)
-    profit_list.append(info["profit"])
-    # print(observation.shape, reward, done, info)
-    env.render()
-env.close()
-plt.plot(reward_list, label="reward")
-plt.plot(profit_list, label="profit")
+# # 使用环境的示例
+# env = FuturesTradingEnv(win_len=30, data_file_path="./data/IC_2015to2018.csv", furtures="IC")
+# observation = env.reset(env.date_idx)
+# done = False
+# import matplotlib.pyplot as plt
+# reward_list = []
+# profit_list = []
+# while not done:
+#     action = env.action_space.sample()  # 或者您的代理生成的行动
+#     observation, reward, done, info = env.step(action)
+#     reward_list.append(reward)
+#     profit_list.append(info["profit"])
+#     # print(observation.shape, reward, done, info)
+#     env.render()
+# env.close()
+# plt.plot(reward_list, label="reward")
+# plt.plot(profit_list, label="profit")
 
-plt.savefig("./reward.png")
+# plt.savefig("./reward.png")
 # df = preProcessData("./data/IC_2015to2018.csv")
 # print(type(df.iloc[0, 0]))
 # df = episode(df, "2019-12-30")
