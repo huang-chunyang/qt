@@ -7,29 +7,100 @@ from tianshou.utils.net.common import Net
 from tianshou.data import Collector, ReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.trainer import offpolicy_trainer
-
-# 确保您的自定义环境已经导入
 from custom_environment import FuturesTradingEnv
+from torch.autograd import Variable
 
-# 定义Actor网络
+USE_CUDA = torch.cuda.is_available()
+FLOAT = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
+def fanin_init(size, fanin=None):
+    fanin = fanin or size[0]
+    v = 1. / np.sqrt(fanin)
+    return torch.Tensor(size).uniform_(-v, v)
+
+def to_numpy(var):
+    return var.cpu().data.numpy() if USE_CUDA else var.data.numpy()
+
+### 这个网络会产生行为输出，
+class Actor(nn.Module):
+    def __init__(self):
+        super(Actor, self).__init__()
+        nb_actions = 2
+        init_w = 0.005
+        self.hidden_rnn = 128
+        self.hidden_fc1 = 256
+        self.hidden_fc2 = 64
+        self.hidden_fc3 = 32
+
+        self.fc1 = nn.Linear(self.hidden_rnn, self.hidden_fc1)
+        self.fc2 = nn.Linear(self.hidden_fc1, self.hidden_fc2)
+        self.fc3 = nn.Linear(self.hidden_fc2, self.hidden_fc3)
+        self.fc4 = nn.Linear(self.hidden_fc3, nb_actions)
+        self.relu = nn.ReLU()
+        self.soft = nn.Softmax(dim=1)
+        self.init_weights(init_w)
+    
+    def init_weights(self, init_w):
+        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
+        self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
+        self.fc3.weight.data = fanin_init(self.fc3.weight.data.size())
+        self.fc4.weight.data.uniform_(-init_w, init_w)
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.relu(self.fc3(x))
+        x = self.fc4(x)
+        a = self.soft(x)
+        return a
+
+class RNN(nn.Module):
+    def __init__(self):
+        super(RNN, self).__init__()
+        self.input_size = 5
+        self.seq_len = 15
+        self.num_layer = 2
+        self.hidden_rnn = 128
+        self.rnn = nn.GRU(self.input_size, self.hidden_rnn, self.num_layer, batch_first=True)
+        self.cx = Variable(torch.zeros(self.num_layer, 1, self.hidden_rnn)).type(FLOAT).cuda()
+        self.hx = Variable(torch.zeros(self.num_layer, 1, self.hidden_rnn)).type(FLOAT).cuda()
+
+    def reset_hidden_state(self, done=True):
+        if done == True:
+            ### hx/cx：[num_layer, batch, hidden_len] ###
+            self.cx = Variable(torch.zeros(self.num_layer, 1, self.hidden_rnn)).type(FLOAT).cuda()
+            self.hx = Variable(torch.zeros(self.num_layer, 1, self.hidden_rnn)).type(FLOAT).cuda()
+        else:
+            self.cx = Variable(self.cx.data).type(FLOAT).cuda()
+            self.hx = Variable(self.hx.data).type(FLOAT).cuda()
+    
+    def forward(self, x, hidden_states=None):
+        if hidden_states == None:
+            out, hx = self.rnn(x, self.hx)
+            self.hx = hx
+        else:
+            out, hx = self.rnn(x, hidden_states)
+        xh = hx[self.num_layer -1, :,:]
+        return xh, hx 
+
+## 定义了 agent 网络。该网络有两部分组成： RNN 用来分析传入的序列的特征， Actor 用来产生行为输出。
 class Net(nn.Module):
     def __init__(self, state_shape, action_shape, device):
         super().__init__()
-        self.gru = nn.GRU(input_size=state_shape[1], hidden_size=64, batch_first=True)
-        self.fc = nn.Linear(64, action_shape)
-        self.device = device
-        self.layer_norm = nn.LayerNorm(64)
+        self.rnn = RNN()
+        self.actor = Actor()
+        self.isTraining = True
 
+    def select_action(self, s, noise_enable=True, decay_epslion=True):
+        xh, _ = self.rnn(s)
+        action = self.actor(xh)
+        action = to_numpy(action.cpu()).squeeze(0)
+        if noise_enable == True:
+            action += self.isTraining * max(self.epsilon, 0) * np.random.randn(1)
+            action = np.Softmax(action)
+        return action
+    
     def forward(self, s, state=None, info={}):
-        # print(s)
-        # print(type(s))
-        if isinstance(s, np.ndarray):
-            s = torch.tensor(s, dtype=torch.float32).to(self.device)
-        if state is not None:
-            state = state.to(self.device)
-        s, h = self.gru(s, state or None)
-        s = self.layer_norm(s[:, -1])
-        return self.fc(s), None
+        action = self.select_action(s, True, False)
+        return action
 
 from tianshou.trainer import BaseTrainer
 
