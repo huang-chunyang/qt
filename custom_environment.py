@@ -62,6 +62,7 @@ class FuturesTradingEnv(gym.Env):
             self.contract_multiplier, self.min_security = 300, 0.2 # 每点300元, 最小变动价位0.2点 from http://www.cffex.com.cn/hs300/
         # 观测历史价格的窗口宽度
         self.win_len = win_len
+        self.SRt0 = 0
         
         # 初始化代码
         # 设置action_space和observation_space
@@ -118,7 +119,6 @@ class FuturesTradingEnv(gym.Env):
         observation = self.market_data_day[self.t - self.win_len: self.t] 
         done = (self.t == self.len)
         truncated = done
-        # print(info.values())
         return observation, reward, done, truncated, info
 
     def reset(self):
@@ -244,6 +244,27 @@ class FuturesTradingEnv(gym.Env):
         self.At0 = eta*r_t + (1-eta)*self.At0
         self.Bt0 = eta*r_t**2 + (1-eta)*self.Bt0
         self.init = True
+        # print("reward", d_t)
+        # eta = 1/self.t
+        # Rt1 = self.account_info["step_hold_profit"] * 300 / (self.account_info["principal"])
+
+        # self.At0 = eta * Rt1 + (1 - eta) * self.At0
+        # self.Bt0 = eta * Rt1 ** 2 + (1 - eta) * self.Bt0
+        
+        # if self.t == 1:
+        #     SRt1 = 0
+        #     DSR = 0
+        # else:
+        #     K_eta = np.sqrt((1-eta)/eta)
+        #     if np.sqrt(self.Bt0 - self.At0**2) == 0:
+        #         SRt1 = 0
+        #     else:
+        #         SRt1 = self.At0 / K_eta / np.sqrt(self.Bt0 - self.At0**2)
+        #     diffSR = SRt1 - self.SRt0
+        #     DSR = diffSR / eta *5
+        # self.SRt0 = SRt1
+        # d_t = DSR
+        # print ("reward", d_t)
         return d_t
     def profit_reward(self, action):
         info = self.account_info

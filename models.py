@@ -4,6 +4,7 @@ import numpy as np
 from torch.autograd import Variable
 from scipy.special import softmax
 from utils import fanin_init, to_numpy, FLOAT
+from utils import OrnsteinUhlenbeckProcess
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ### 收集 RNN 网络产生的状态信息，输出为一个行为信号。 ###
@@ -22,7 +23,6 @@ class Actor(nn.Module):
         self.fc3 = nn.Linear(self.hidden_fc2, self.hidden_fc3)
         self.fc4 = nn.Linear(self.hidden_fc3, nb_actions)
         self.relu = nn.ReLU()
-        self.soft = nn.Softmax(dim=1)
         self.init_weights(init_w)
     
     def init_weights(self, init_w):
@@ -35,8 +35,7 @@ class Actor(nn.Module):
         x = self.relu(self.fc2(x))
         x = self.relu(self.fc3(x))
         x = self.fc4(x)
-        a = self.soft(x)
-        return a
+        return x
 
 class RNN(nn.Module):
     def __init__(self, args):
@@ -47,8 +46,11 @@ class RNN(nn.Module):
         self.hidden_rnn = args.hidden_rnn
         self.bsize = args.bsize
         self.rnn = nn.GRU(self.input_size, self.hidden_rnn, self.num_layer, batch_first=True).to(device)
-        # self.cx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
-        # self.hx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
+        for name, param in self.rnn.named_parameters():
+            if 'weight' in name:
+                nn.init.xavier_uniform_(param)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
 
     # def reset_hidden_state(self, done=True):
 
@@ -69,7 +71,7 @@ class RNN(nn.Module):
         else:
             out, hx = self.rnn(x, None)
         ## 使用倒数第二层的输出作为最终的输出
-        xh = hx[self.num_layer -1, :,:]
+        xh = hx[self.num_layer -1, :, :]
         return xh, hx 
 
 ## 定义了 agent 网络。该网络有两部分组成： RNN 用来分析传入的序列的特征， Actor 用来产生行为输出。
@@ -79,10 +81,17 @@ class Net(nn.Module):
         self.rnn = RNN(args).to(device)
         self.actor = Actor(args).to(device)
         self.isTraining = True
+        self.soft = nn.Softmax(dim=1)
+        self.epsilon = 1
+        self.random_process = OrnsteinUhlenbeckProcess(size=2, theta=args.ou_theta, mu=args.ou_mu, sigma=args.ou_sigma)
 
     def select_action(self, s, noise_enable=True, decay_epslion=True):
         xh, _ = self.rnn(s)
         action = self.actor(xh)
+        if noise_enable:
+            action += torch.tensor(self.isTraining * max(self.epsilon, 0) * self.random_process.sample()).cuda()
+        action = self.soft(action)
+
         # action = torch.argmax(action.cpu(), dim=1)
         # action = to_numpy(action.cpu()).squeeze(0)
         # if noise_enable == True:
