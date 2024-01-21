@@ -100,7 +100,7 @@ class FuturesTradingEnv(gym.Env):
             "position": 0, 
         }
     def step(self, action):
-        print(action)
+        # print(action)
         # 处理一步交易逻辑
         # action：{long 0, short 1} -> 论文中为{-1, 1}
         if action==0:
@@ -113,6 +113,7 @@ class FuturesTradingEnv(gym.Env):
         info = self.account_info
         
         reward = self.DSR_reward(action)
+        print(action, reward)
         # reward = self.profit_reward(action)
         self.t += 1 # 顺序很重要
         observation = self.market_data_day[self.t - self.win_len: self.t] 
