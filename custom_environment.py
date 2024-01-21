@@ -98,9 +98,9 @@ class FuturesTradingEnv(gym.Env):
             "step_hold_profit": 0, 
             "profit": 0,
             "position": 0, 
+            "preposition": 0,
         }
     def step(self, action):
-        print(action)
         # 处理一步交易逻辑
         # action：{long 0, short 1} -> 论文中为{-1, 1}
         if action==0:
@@ -130,6 +130,7 @@ class FuturesTradingEnv(gym.Env):
         self.date_idx += 1 # 下一次reset 随机到另一天的数据
         # 模型输入需要观察wein_len 宽的历史数据，因此开票之后需要等一等
         self.t = self.win_len
+        self.init = False
         # print("market_data_day", self.market_data_day)
         self.market_obs = self.market_data_day[self.t - self.win_len: self.t] # [0, t-1] ['open', 'close', 'high', 'low', 'volume']
         HH, LC = self.market_obs['high'].max(), self.market_obs['close'].min()
@@ -169,9 +170,10 @@ class FuturesTradingEnv(gym.Env):
             
         pc_t, pc_t_ = self.market_data_day.iloc[self.t].loc["close"], self.market_data_day.iloc[self.t-1].loc["close"] # p_t, p_t-1
         info = self.account_info
-        margin, principal, hold_float, step_hold_profit, profit, position = info['margin'], info['principal'], info['hold_float'], info['step_hold_profit'], info['profit'], info['position']
+        margin, principal, hold_float, step_hold_profit, profit, position, prePosition = info['margin'], info['principal'], info['hold_float'], info['step_hold_profit'], info['profit'], info['position'], info['preposition']
 
         '''### 依「交易訊號&持單狀態」執行交易rules ###'''
+        prePosition = position
         if action == 1:  #action為交易訊號：{1=long, -1=short}
             if position == 1:  #position為agent下單狀態：{-1=空單, 0=無單, 1=多單}
                 profit = 0
@@ -208,14 +210,15 @@ class FuturesTradingEnv(gym.Env):
                 step_hold_profit = (pc_t-pc_t_)*position
                 hold_float += step_hold_profit
                 margin += hold_float*self.contract_multiplier
-        self.account_info = {
-            "margin": margin,
-            "principal": principal,
-            "hold_float": hold_float, 
-            "step_hold_profit": step_hold_profit, 
-            "profit": profit,
-            "position": position, 
-        }
+            
+        print('action: ', action, 'profit: ', profit, 'margin: ', margin, 'hold_float: ', hold_float, 'step_hold_profit: ', step_hold_profit, 'position: ', position, 'prePosition: ', prePosition)
+        self.account_info['margin'] = margin
+        self.account_info['principal'] = principal
+        self.account_info['hold_float'] = hold_float
+        self.account_info['step_hold_profit'] = step_hold_profit
+        self.account_info['profit'] = profit
+        self.account_info['position'] = position
+        self.account_info['preposition'] = prePosition
     def DSR_reward(self, action):
         """
         参考https://github.com/nctu-dcs-lab/iRDPG-for-Quantitative-Trading-on-Stock-Index-Futures/blob/main/environment.py中的DSR_reward2 函数，
@@ -224,10 +227,13 @@ class FuturesTradingEnv(gym.Env):
         eta = 1/self.t # decay, 也可尝试使用常数
         # eta = 1/240
         info = self.account_info
-        margin, principal, hold_float, step_hold_profit, profit, position = info.values()
+        if self.init == False:
+            margin, principal, hold_float, step_hold_profit, profit, position, prePosition  = info.values()
+        else:
+            margin, principal, hold_float, step_hold_profit, profit, position, prePosition, ind  = info.values()
         pc_t, pc_t_ = self.market_data_day.iloc[self.t].loc["close"], self.market_data_day.iloc[self.t-1].loc["close"] # p_t, p_t-1
         ### Calculate step return #####
-        r_t = (pc_t-pc_t_ - 2*self.slip)*position - self.trans_fee*np.abs(position - action)*pc_t
+        r_t = (pc_t-pc_t_ - 2*self.slip)*prePosition - self.trans_fee*np.abs(prePosition - action)*pc_t
 
         if self.Bt0 - self.At0**2 ==0:
             d_t = 0
@@ -237,6 +243,7 @@ class FuturesTradingEnv(gym.Env):
         ### update At0 & Bt0 ###
         self.At0 = eta*r_t + (1-eta)*self.At0
         self.Bt0 = eta*r_t**2 + (1-eta)*self.Bt0
+        self.init = True
         return d_t
     def profit_reward(self, action):
         info = self.account_info

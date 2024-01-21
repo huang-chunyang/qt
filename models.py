@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.autograd import Variable
+from scipy.special import softmax
 from utils import fanin_init, to_numpy, FLOAT
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,26 +47,27 @@ class RNN(nn.Module):
         self.hidden_rnn = args.hidden_rnn
         self.bsize = args.bsize
         self.rnn = nn.GRU(self.input_size, self.hidden_rnn, self.num_layer, batch_first=True).to(device)
-        self.cx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
-        self.hx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
+        # self.cx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
+        # self.hx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
 
-    def reset_hidden_state(self, done=True):
-        if done == True:
-            ### hx/cx：[num_layer, batch, hidden_len] ###
-            self.cx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
-            self.hx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
-        else:
-            self.cx = Variable(self.cx.data).type(FLOAT).cuda()
-            self.hx = Variable(self.hx.data).type(FLOAT).cuda()
+    # def reset_hidden_state(self, done=True):
+
+        # if done == True:
+        #     ### hx/cx：[num_layer, batch, hidden_len] ###
+        #     self.cx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
+        #     self.hx = Variable(torch.zeros(self.num_layer, self.bsize, self.hidden_rnn)).type(FLOAT).cuda()
+        # else:
+        #     self.cx = Variable(self.cx.data).type(FLOAT).cuda()
+        #     self.hx = Variable(self.hx.data).type(FLOAT).cuda()
     
     def forward(self, x, hidden_states=None):
         if isinstance(x, np.ndarray):
             x = torch.tensor(x, dtype=torch.float32).to(device)
         if hidden_states == None:
-            out, hx = self.rnn(x, self.hx)
+            out, hx = self.rnn(x, None)
             self.hx = hx
         else:
-            out, hx = self.rnn(x, hidden_states)
+            out, hx = self.rnn(x, None)
         ## 使用倒数第二层的输出作为最终的输出
         xh = hx[self.num_layer -1, :,:]
         return xh, hx 
@@ -81,6 +83,7 @@ class Net(nn.Module):
     def select_action(self, s, noise_enable=True, decay_epslion=True):
         xh, _ = self.rnn(s)
         action = self.actor(xh)
+        # action = torch.argmax(action.cpu(), dim=1)
         # action = to_numpy(action.cpu()).squeeze(0)
         # if noise_enable == True:
         #     action += self.isTraining * max(self.epsilon, 0) * np.random.randn(1)
@@ -89,4 +92,4 @@ class Net(nn.Module):
     
     def forward(self, s, state=None, info={}):
         action = self.select_action(s, True, False)
-        return action
+        return action, None
