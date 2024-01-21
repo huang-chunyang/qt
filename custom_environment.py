@@ -63,6 +63,7 @@ class FuturesTradingEnv(gym.Env):
         # 观测历史价格的窗口宽度
         self.win_len = win_len
         self.SRt0 = 0
+        self.indx = 0
         
         # 初始化代码
         # 设置action_space和observation_space
@@ -119,6 +120,9 @@ class FuturesTradingEnv(gym.Env):
         observation = self.market_data_day[self.t - self.win_len: self.t] 
         done = (self.t == self.len)
         truncated = done
+        self.indx += 1
+        print(self.indx,",",self.account_info["margin"], ",", self.account_info["hold_float"],",",  self.account_info["step_hold_profit"],",", action,",")
+
         return observation, reward, done, truncated, info
 
     def reset(self):
@@ -146,6 +150,7 @@ class FuturesTradingEnv(gym.Env):
         self.account_info = self._init_account()
         # 初始化At0, Bt0, 为计算differential Sharpe radio
         self.At0, self.Bt0 = 0, 0
+        self.indx = 0
         # 返回初始观察值, account_info
         observation = {
             "market_data": self.market_obs, # 5: open, close, high, low, volume
@@ -210,8 +215,8 @@ class FuturesTradingEnv(gym.Env):
                 step_hold_profit = (pc_t-pc_t_)*position
                 hold_float += step_hold_profit
                 margin += hold_float*self.contract_multiplier
-            
-        print('action: ', action, 'profit: ', profit, 'margin: ', margin, 'hold_float: ', hold_float, 'step_hold_profit: ', step_hold_profit, 'position: ', position, 'prePosition: ', prePosition)
+        
+        ## print('action: ', action, 'profit: ', profit, 'margin: ', margin, 'hold_float: ', hold_float, 'step_hold_profit: ', step_hold_profit, 'position: ', position, 'prePosition: ', prePosition)
         self.account_info['margin'] = margin
         self.account_info['principal'] = principal
         self.account_info['hold_float'] = hold_float

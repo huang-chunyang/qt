@@ -59,8 +59,8 @@ if __name__ == "__main__":
     state_shape = env.observation_space[0]
     print("The shape of action is", action_shape, " The shape of state is ", state_shape)
     policy = DQNPolicy(net, optim,discount_factor=0.95,
-                        estimation_step=3, target_update_freq=320)
-    policy.set_eps(0.1)
+                        estimation_step=2, target_update_freq=500)
+    policy.set_eps(0.5)
 
     ### prepare data collector
     train_collector = Collector(policy, train_envs, VectorReplayBuffer(total_size=50000, buffer_num=args.bsize))

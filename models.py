@@ -63,6 +63,7 @@ class RNN(nn.Module):
         #     self.hx = Variable(self.hx.data).type(FLOAT).cuda()
     
     def forward(self, x, hidden_states=None):
+        self.rnn.flatten_parameters()
         if isinstance(x, np.ndarray):
             x = torch.tensor(x, dtype=torch.float32).to(device)
         if hidden_states == None:
